@@ -1,7 +1,6 @@
 import csv
 import os
 import io
-from socket import create_server
 from zipfile import ZipFile
 import pytest
 from openpyxl.reader.excel import load_workbook
@@ -11,7 +10,6 @@ PATH_RES ="resources"
 PATH_ARCH = "my_zip.zip"
 
 L_files = os.listdir(PATH_RES) #создаем список для удобства
-print(L_files) #для дебага и собственного спокойствия
 
 def create_archive(): #создаем архив с файлами
     with ZipFile(PATH_ARCH, mode="w") as myzip:
@@ -19,34 +17,40 @@ def create_archive(): #создаем архив с файлами
             myzip.write(os.path.join(PATH_RES, file)) #файлы вынулись из директории и из них создался архив
 #create_archive()
 
-#читаем файлы
-def test_reading_from_archive():
-    with ZipFile(PATH_ARCH, mode="r") as myzip:
-        for file in myzip.namelist():
-            if file.endswith(".csv"):
-                with io.TextIOWrapper(myzip.open(file, "r"), encoding="utf-8") as io_wrapper:
-                    csvfile = csv.reader(io_wrapper)
-                    for row in csvfile:
-                        print(row)
-                        if row == ['3', 'Sarena', 'Cornewell', 'scornewell2@nyu.edu', 'Female', '251.107.184.114']: #проверка наличия строки
-                            break
-                    else:
-                        raise Exception('Row not found')
-            elif file.endswith(".xlsx"):
-                with myzip.open(file, "r")  as io_xlsx:
-                    xlsxfile = load_workbook(io_xlsx)
-                    sheet = xlsxfile.active
-                    assert sheet.cell(row=1, column=1).value == 'snail!'
-                    #sheet = xlsxfile.active
+@pytest.fixture(scope="session")
+def myzip():
+    with ZipFile(PATH_ARCH, "r") as myzip:
+        yield myzip
 
-            elif file.endswith("pdf"):
-                with myzip.open(file, "r") as reader:
-                    print(type(reader))
-                    pdf_file = PdfReader(reader)
-                    page = pdf_file.pages[0]
-                    text = page.extract_text()
-                    print(text)
-                    assert "Никакой полезной информации он не несёт" in text
-#reading_from_archive()
-#проверки
-#PdfReader(open("resources/very_important.pdf", "b+r")) #это было для дебага
+@pytest.fixture
+def archived_file(myzip, request):
+    file_format = request.param
+    for file in myzip.namelist():
+        if file.endswith(file_format):
+            with myzip.open(file, "r") as fd:
+                yield fd
+
+@pytest.mark.parametrize('archived_file', ["csv"], indirect=True)
+def test_csv(archived_file):
+    with io.TextIOWrapper(archived_file, encoding="utf-8") as io_wrapper:
+        csvfile = csv.reader(io_wrapper)
+        founded = False
+        for row in csvfile:
+            if row == ['3', 'Sarena', 'Cornewell', 'scornewell2@nyu.edu', 'Female',
+                       '251.107.184.114']:  # проверка наличия строки
+                founded = True
+                break
+        assert founded == True
+
+@pytest.mark.parametrize('archived_file', ["xlsx"], indirect=True)
+def test_xlsx(archived_file):
+    xlsxfile = load_workbook(archived_file)
+    sheet = xlsxfile.active
+    assert sheet.cell(row=1, column=1).value == 'snail!'
+
+@pytest.mark.parametrize('archived_file', ["pdf"], indirect=True)
+def test_pdf(archived_file):
+    pdf_file = PdfReader(archived_file)
+    page = pdf_file.pages[0]
+    text = page.extract_text()
+    assert "Никакой полезной информации он не несёт" in text
